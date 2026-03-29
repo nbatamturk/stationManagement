@@ -16,7 +16,13 @@ const TabIcon = ({
 
 export default function TabLayout(): React.JSX.Element {
   const insets = useSafeAreaInsets();
-  const bottomInset = Math.max(insets.bottom, Platform.OS === 'android' ? 12 : 8);
+  const bottomInset =
+    Platform.OS === 'android'
+      ? insets.bottom > 0
+        ? insets.bottom
+        : 20
+      : Math.max(insets.bottom, 8);
+  const tabBarHeight = 56 + bottomInset;
 
   return (
     <Tabs
@@ -26,9 +32,9 @@ export default function TabLayout(): React.JSX.Element {
         tabBarStyle: {
           borderTopColor: '#E1E7EE',
           borderTopWidth: 1,
-          height: 52 + bottomInset,
+          height: tabBarHeight,
           paddingBottom: bottomInset,
-          paddingTop: 8,
+          paddingTop: 6,
           backgroundColor: '#FFFFFF',
         },
         tabBarItemStyle: {
