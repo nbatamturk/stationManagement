@@ -10,7 +10,6 @@ import {
   EmptyState,
   LoadingState,
   OptionChip,
-  SectionHeader,
   StatusBadge,
   colors,
 } from '@/components';
@@ -86,11 +85,6 @@ export default function StationListScreen(): React.JSX.Element {
 
   return (
     <AppScreen>
-      <SectionHeader
-        title="Charging Stations"
-        subtitle="Search, filter, and sort engineering test stations"
-      />
-
       <AppCard>
         <AppTextInput
           label="Search"
@@ -165,6 +159,8 @@ export default function StationListScreen(): React.JSX.Element {
         <EmptyState
           title="No stations found"
           description="Try adjusting search text or filters to find matching records."
+          actionLabel="Reset Filters"
+          onActionPress={() => setFilters(defaultFilters)}
         />
       ) : (
         stations.map((station) => (

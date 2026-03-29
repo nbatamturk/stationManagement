@@ -81,9 +81,25 @@ export const upsertCustomFieldDefinition = async (
 ): Promise<string> => {
   const id = existingId ?? createId('cfd');
   const key = normalizeCustomFieldKey(draft.key || draft.label);
+  const trimmedOptionsJson = draft.optionsJson.trim();
 
   if (!key) {
     throw new Error('Field key cannot be empty.');
+  }
+
+  if (draft.type === 'select') {
+    if (!trimmedOptionsJson) {
+      throw new Error('Select fields must include options.');
+    }
+
+    try {
+      const parsed = JSON.parse(trimmedOptionsJson);
+      if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== 'string')) {
+        throw new Error();
+      }
+    } catch {
+      throw new Error('Select options are invalid.');
+    }
   }
 
   await withDatabase(async (db) => {
@@ -105,7 +121,7 @@ export const upsertCustomFieldDefinition = async (
       key,
       draft.label.trim(),
       draft.type,
-      draft.optionsJson.trim() ? draft.optionsJson.trim() : null,
+      trimmedOptionsJson ? trimmedOptionsJson : null,
       toInt(draft.isRequired),
       toInt(draft.isFilterable),
       toInt(draft.isVisibleInList),

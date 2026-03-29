@@ -1,6 +1,6 @@
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
   AppButton,
@@ -11,11 +11,11 @@ import {
   LabeledSwitch,
   LoadingState,
   OptionChip,
-  SectionHeader,
   colors,
 } from '@/components';
 import { getCustomFieldDefinitions, setCustomFieldActive, upsertCustomFieldDefinition } from '@/features/custom-fields';
 import type { CustomFieldDefinition, CustomFieldDefinitionDraft, CustomFieldType } from '@/types';
+import { optionsEditorTextToJson, optionsJsonToEditorText } from '@/utils/custom-field';
 
 const customFieldTypeOptions: CustomFieldType[] = ['text', 'number', 'boolean', 'date', 'select'];
 
@@ -48,6 +48,7 @@ export default function CustomFieldSettingsScreen(): React.JSX.Element {
   const [saving, setSaving] = useState(false);
   const [definitions, setDefinitions] = useState<CustomFieldDefinition[]>([]);
   const [draft, setDraft] = useState<CustomFieldDefinitionDraft>(createDefaultDraft());
+  const [selectOptionsText, setSelectOptionsText] = useState('');
   const [selectedFieldId, setSelectedFieldId] = useState<string | undefined>(undefined);
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -69,6 +70,7 @@ export default function CustomFieldSettingsScreen(): React.JSX.Element {
 
   const resetForm = (): void => {
     setDraft(createDefaultDraft());
+    setSelectOptionsText('');
     setSelectedFieldId(undefined);
     setErrorMessage('');
   };
@@ -81,17 +83,18 @@ export default function CustomFieldSettingsScreen(): React.JSX.Element {
       return;
     }
 
-    if (draft.type === 'select' && draft.optionsJson.trim()) {
-      try {
-        const parsed = JSON.parse(draft.optionsJson);
-        if (!Array.isArray(parsed)) {
-          setErrorMessage('Options JSON must be an array.');
-          return;
-        }
-      } catch {
-        setErrorMessage('Options JSON is invalid.');
+    let normalizedOptionsJson = '';
+
+    if (draft.type === 'select') {
+      const json = optionsEditorTextToJson(selectOptionsText);
+      const parsed = JSON.parse(json);
+
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        setErrorMessage('Select fields must include at least one option.');
         return;
       }
+
+      normalizedOptionsJson = json;
     }
 
     setSaving(true);
@@ -100,6 +103,7 @@ export default function CustomFieldSettingsScreen(): React.JSX.Element {
       await upsertCustomFieldDefinition(
         {
           ...draft,
+          optionsJson: normalizedOptionsJson,
           sortOrder: Number.isNaN(Number(draft.sortOrder)) ? 0 : Number(draft.sortOrder),
         },
         selectedFieldId,
@@ -119,17 +123,33 @@ export default function CustomFieldSettingsScreen(): React.JSX.Element {
   };
 
   const toggleFieldActive = async (definition: CustomFieldDefinition): Promise<void> => {
-    await setCustomFieldActive(definition.id, !definition.isActive);
+    if (definition.isActive) {
+      Alert.alert(
+        'Disable Field',
+        `Disable "${definition.label}"? Existing values will be kept, but the field will be hidden from active usage.`,
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: 'Disable',
+            style: 'destructive',
+            onPress: () => {
+              void setCustomFieldActive(definition.id, false).then(loadDefinitions);
+            },
+          },
+        ],
+      );
+      return;
+    }
+
+    await setCustomFieldActive(definition.id, true);
     await loadDefinitions();
   };
 
   return (
     <AppScreen>
-      <SectionHeader
-        title="Custom Field Management"
-        subtitle="Define dynamic station attributes for forms and list views"
-      />
-
       <AppCard>
         <Text style={styles.cardTitle}>{selectedFieldId ? 'Edit Field' : 'Create Field'}</Text>
 
@@ -162,13 +182,17 @@ export default function CustomFieldSettingsScreen(): React.JSX.Element {
         </View>
 
         {draft.type === 'select' ? (
-          <AppTextInput
-            label="Options JSON"
-            value={draft.optionsJson}
-            onChangeText={(value) => setDraft((prev) => ({ ...prev, optionsJson: value }))}
-            placeholder='["Option A", "Option B"]'
-            autoCapitalize="none"
-          />
+          <View style={styles.selectEditorGroup}>
+            <AppTextInput
+              label="Select Options"
+              value={selectOptionsText}
+              onChangeText={setSelectOptionsText}
+              placeholder={'Option A\\nOption B\\nOption C'}
+              autoCapitalize="none"
+              multiline
+            />
+            <Text style={styles.selectEditorHint}>Enter one option per line.</Text>
+          </View>
         ) : null}
 
         <AppTextInput
@@ -225,7 +249,12 @@ export default function CustomFieldSettingsScreen(): React.JSX.Element {
         {loading ? (
           <LoadingState label="Loading field definitions..." />
         ) : definitions.length === 0 ? (
-          <EmptyState title="No custom fields" description="Create your first dynamic field above." />
+          <EmptyState
+            title="No custom fields"
+            description="Create your first dynamic field above."
+            actionLabel="Start New Field"
+            onActionPress={resetForm}
+          />
         ) : (
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <View style={styles.definitionList}>
@@ -236,6 +265,7 @@ export default function CustomFieldSettingsScreen(): React.JSX.Element {
                   onPress={() => {
                     setSelectedFieldId(definition.id);
                     setDraft(definitionToDraft(definition));
+                    setSelectOptionsText(optionsJsonToEditorText(definition.optionsJson));
                     setErrorMessage('');
                   }}
                 >
@@ -249,7 +279,7 @@ export default function CustomFieldSettingsScreen(): React.JSX.Element {
                     {definition.isVisibleInList ? 'Yes' : 'No'}
                   </Text>
                   <AppButton
-                    label={definition.isActive ? 'Deactivate' : 'Activate'}
+                    label={definition.isActive ? 'Disable' : 'Enable'}
                     variant={definition.isActive ? 'secondary' : 'primary'}
                     onPress={() => {
                       void toggleFieldActive(definition);
@@ -283,6 +313,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+  },
+  selectEditorGroup: {
+    gap: 6,
+  },
+  selectEditorHint: {
+    fontSize: 12,
+    color: colors.mutedText,
   },
   actionRow: {
     flexDirection: 'row',

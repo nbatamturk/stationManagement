@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
-import { colors, radius } from '@/components/theme';
+import { colors, radius, spacing } from '@/components/theme';
 
 type AppCardProps = {
   children: React.ReactNode;
@@ -18,7 +18,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 14,
-    gap: 8,
+    padding: spacing.md,
+    gap: spacing.sm,
   },
 });

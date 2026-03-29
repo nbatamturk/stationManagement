@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import React from 'react';
+import { Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors } from '@/components/theme';
 
@@ -13,6 +15,9 @@ const TabIcon = ({
 }): React.JSX.Element => <Ionicons name={name} size={20} color={color} />;
 
 export default function TabLayout(): React.JSX.Element {
+  const insets = useSafeAreaInsets();
+  const bottomInset = Math.max(insets.bottom, Platform.OS === 'android' ? 12 : 8);
+
   return (
     <Tabs
       screenOptions={{
@@ -20,10 +25,20 @@ export default function TabLayout(): React.JSX.Element {
         tabBarInactiveTintColor: '#7D879A',
         tabBarStyle: {
           borderTopColor: '#E1E7EE',
-          height: 62,
-          paddingBottom: 8,
+          borderTopWidth: 1,
+          height: 52 + bottomInset,
+          paddingBottom: bottomInset,
           paddingTop: 8,
+          backgroundColor: '#FFFFFF',
         },
+        tabBarItemStyle: {
+          paddingVertical: 2,
+        },
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: '600',
+        },
+        tabBarHideOnKeyboard: true,
         headerTitleStyle: {
           fontSize: 16,
           fontWeight: '700',
@@ -33,7 +48,7 @@ export default function TabLayout(): React.JSX.Element {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Dashboard',
+          title: 'Ana Sayfa',
           tabBarIcon: ({ color }) => <TabIcon name="home-outline" color={color} />,
         }}
       />

@@ -11,7 +11,6 @@ import {
   LabeledSwitch,
   LoadingState,
   OptionChip,
-  SectionHeader,
   colors,
 } from '@/components';
 import { getCustomFieldDefinitions } from '@/features/custom-fields';
@@ -64,8 +63,18 @@ type FormErrors = Partial<Record<keyof StationFormValues | string, string>>;
 const validateBaseFields = (form: StationFormValues): FormErrors => {
   const errors: FormErrors = {};
 
-  if (!form.name.trim()) errors.name = 'Name is required.';
-  if (!form.code.trim()) errors.code = 'Code is required.';
+  if (!form.name.trim()) {
+    errors.name = 'Name is required.';
+  } else if (form.name.trim().length < 3) {
+    errors.name = 'Name must be at least 3 characters.';
+  }
+
+  if (!form.code.trim()) {
+    errors.code = 'Code is required.';
+  } else if (form.code.trim().length < 3) {
+    errors.code = 'Code must be at least 3 characters.';
+  }
+
   if (!form.qrCode.trim()) errors.qrCode = 'QR code is required.';
   if (!form.brand.trim()) errors.brand = 'Brand is required.';
   if (!form.model.trim()) errors.model = 'Model is required.';
@@ -80,8 +89,12 @@ const validateBaseFields = (form: StationFormValues): FormErrors => {
     errors.powerKw = 'Power must be a positive number.';
   }
 
-  if (form.lastTestDate.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(form.lastTestDate.trim())) {
-    errors.lastTestDate = 'Use date format YYYY-MM-DD.';
+  if (form.lastTestDate.trim()) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(form.lastTestDate.trim())) {
+      errors.lastTestDate = 'Use date format YYYY-MM-DD.';
+    } else if (Number.isNaN(new Date(form.lastTestDate.trim()).getTime())) {
+      errors.lastTestDate = 'Last test date is invalid.';
+    }
   }
 
   return errors;
@@ -89,9 +102,10 @@ const validateBaseFields = (form: StationFormValues): FormErrors => {
 
 export default function AddEditStationScreen(): React.JSX.Element {
   const router = useRouter();
-  const params = useLocalSearchParams<{ stationId?: string }>();
+  const params = useLocalSearchParams<{ stationId?: string; qrCode?: string }>();
 
   const stationId = typeof params.stationId === 'string' ? params.stationId : undefined;
+  const scannedQrCode = typeof params.qrCode === 'string' ? params.qrCode.trim() : '';
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -110,7 +124,10 @@ export default function AddEditStationScreen(): React.JSX.Element {
       setCustomDefinitions(definitions);
 
       if (!stationId) {
-        setForm(createDefaultForm());
+        setForm((prev) => ({
+          ...createDefaultForm(),
+          qrCode: scannedQrCode || prev.qrCode,
+        }));
         setCustomValues({});
         setStationNotFound(false);
         return;
@@ -131,7 +148,7 @@ export default function AddEditStationScreen(): React.JSX.Element {
     } finally {
       setLoading(false);
     }
-  }, [stationId]);
+  }, [scannedQrCode, stationId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -143,13 +160,45 @@ export default function AddEditStationScreen(): React.JSX.Element {
     const customErrors: FormErrors = {};
 
     for (const definition of customDefinitions) {
+      const errorKey = `custom_${definition.id}`;
+      const value = customValues[definition.id]?.trim() ?? '';
+
       if (!definition.isRequired) {
+        if (!value) {
+          continue;
+        }
+      } else if (!value) {
+        customErrors[errorKey] = `${definition.label} is required.`;
         continue;
       }
 
-      const value = customValues[definition.id]?.trim() ?? '';
-      if (!value) {
-        customErrors[`custom_${definition.id}`] = `${definition.label} is required.`;
+      if (definition.type === 'number' && Number.isNaN(Number(value))) {
+        customErrors[errorKey] = `${definition.label} must be a valid number.`;
+        continue;
+      }
+
+      if (definition.type === 'date') {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+          customErrors[errorKey] = `${definition.label} must use YYYY-MM-DD format.`;
+          continue;
+        }
+
+        if (Number.isNaN(new Date(value).getTime())) {
+          customErrors[errorKey] = `${definition.label} is not a valid date.`;
+          continue;
+        }
+      }
+
+      if (definition.type === 'boolean' && value !== 'true' && value !== 'false') {
+        customErrors[errorKey] = `${definition.label} must be true or false.`;
+        continue;
+      }
+
+      if (definition.type === 'select') {
+        const options = parseSelectOptions(definition.optionsJson);
+        if (options.length > 0 && !options.includes(value)) {
+          customErrors[errorKey] = `${definition.label} must be one of the listed options.`;
+        }
       }
     }
 
@@ -166,7 +215,7 @@ export default function AddEditStationScreen(): React.JSX.Element {
     setErrors(mergedErrors);
 
     if (Object.keys(mergedErrors).length > 0) {
-      setSubmitMessage('Please fix the highlighted fields.');
+      setSubmitMessage('Please fix the highlighted fields and try again.');
       return;
     }
 
@@ -205,8 +254,6 @@ export default function AddEditStationScreen(): React.JSX.Element {
     }
   };
 
-  const title = stationId ? 'Edit Station' : 'Add Station';
-
   if (loading) {
     return (
       <AppScreen>
@@ -218,15 +265,25 @@ export default function AddEditStationScreen(): React.JSX.Element {
   if (stationNotFound) {
     return (
       <AppScreen>
-        <SectionHeader title="Edit Station" subtitle="Update base and dynamic fields" />
-        <EmptyState title="Station not found" description="This record may have been deleted." />
+        <EmptyState
+          title="Station not found"
+          description="This record may have been deleted."
+          actionLabel="Create New Station"
+          onActionPress={() => router.replace('/stations/edit')}
+        />
       </AppScreen>
     );
   }
 
   return (
     <AppScreen>
-      <SectionHeader title={title} subtitle="Base fields and dynamic custom properties" />
+      {!stationId && scannedQrCode ? (
+        <AppCard>
+          <Text style={styles.scanHintText}>
+            QR code was prefilled from scanner. Review remaining fields and save.
+          </Text>
+        </AppCard>
+      ) : null}
 
       <AppCard>
         <Text style={styles.cardTitle}>Base Fields</Text>
@@ -381,6 +438,19 @@ export default function AddEditStationScreen(): React.JSX.Element {
                     {definition.isRequired ? ' *' : ''}
                   </Text>
                   <View style={styles.segmentRow}>
+                    {!definition.isRequired ? (
+                      <OptionChip
+                        key="clear-option"
+                        label="Clear"
+                        selected={!value}
+                        onPress={() =>
+                          setCustomValues((prev) => ({
+                            ...prev,
+                            [definition.id]: '',
+                          }))
+                        }
+                      />
+                    ) : null}
                     {options.map((option) => (
                       <OptionChip
                         key={option}
@@ -436,6 +506,11 @@ export default function AddEditStationScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
+  scanHintText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '600',
+  },
   cardTitle: {
     fontSize: 15,
     color: colors.text,

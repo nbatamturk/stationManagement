@@ -21,3 +21,17 @@ export const normalizeCustomFieldKey = (input: string): string => {
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
 };
+
+export const optionsJsonToEditorText = (optionsJson?: string | null): string => {
+  const options = parseSelectOptions(optionsJson);
+  return options.join('\n');
+};
+
+export const optionsEditorTextToJson = (editorText: string): string => {
+  const options = editorText
+    .split('\n')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return JSON.stringify(options);
+};

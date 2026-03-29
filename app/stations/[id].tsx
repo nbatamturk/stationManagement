@@ -2,12 +2,13 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { AppButton, AppCard, AppScreen, EmptyState, LoadingState, SectionHeader, StatusBadge, colors } from '@/components';
+import { AppButton, AppCard, AppScreen, EmptyState, LoadingState, StatusBadge, colors } from '@/components';
 import { getCustomFieldDefinitions } from '@/features/custom-fields';
 import { getStationById } from '@/features/stations';
 import type { CustomFieldDefinition } from '@/types';
 import type { StationDetails } from '@/features/stations';
-import { formatDateShort } from '@/utils/date';
+import { formatDateShort, formatDateTime } from '@/utils/date';
+import { STATION_STATUS_LABELS } from '@/utils/station';
 
 const FieldRow = ({ label, value }: { label: string; value?: string | number | null }): React.JSX.Element => {
   return (
@@ -40,7 +41,7 @@ export default function StationDetailScreen(): React.JSX.Element {
     try {
       const [stationResult, definitionResult] = await Promise.all([
         getStationById(stationId),
-        getCustomFieldDefinitions(true),
+        getCustomFieldDefinitions(false),
       ]);
 
       setStation(stationResult);
@@ -61,23 +62,24 @@ export default function StationDetailScreen(): React.JSX.Element {
       return [];
     }
 
-    return customDefinitions
-      .map((definition) => ({
-        id: definition.id,
-        label: definition.label,
-        value: station.customValuesByFieldId[definition.id],
-      }))
-      .filter((item) => item.value);
+    return customDefinitions.map((definition) => ({
+      id: definition.id,
+      label: definition.label,
+      value: station.customValuesByFieldId[definition.id] ?? '-',
+    }));
   }, [customDefinitions, station]);
 
   return (
     <AppScreen>
-      <SectionHeader title="Station Detail" subtitle="Base information and dynamic custom properties" />
-
       {loading ? (
         <LoadingState label="Loading station details..." />
       ) : !station ? (
-        <EmptyState title="Station not found" description="The selected station record could not be loaded." />
+        <EmptyState
+          title="Station not found"
+          description="The selected station record could not be loaded."
+          actionLabel="Go To Station List"
+          onActionPress={() => router.replace('/stations')}
+        />
       ) : (
         <>
           <AppCard>
@@ -91,15 +93,22 @@ export default function StationDetailScreen(): React.JSX.Element {
               <StatusBadge status={station.status} />
             </View>
 
+            <FieldRow label="Station ID" value={station.id} />
+            <FieldRow label="Name" value={station.name} />
+            <FieldRow label="Code" value={station.code} />
+            <FieldRow label="Status" value={STATION_STATUS_LABELS[station.status]} />
             <FieldRow label="QR Code" value={station.qrCode} />
+            <FieldRow label="Brand" value={station.brand} />
+            <FieldRow label="Model" value={station.model} />
             <FieldRow label="Serial Number" value={station.serialNumber} />
             <FieldRow label="Power" value={`${station.powerKw} kW`} />
             <FieldRow label="Current Type" value={station.currentType} />
             <FieldRow label="Socket Type" value={station.socketType} />
             <FieldRow label="Location" value={station.location} />
             <FieldRow label="Last Test Date" value={formatDateShort(station.lastTestDate)} />
-            <FieldRow label="Updated" value={formatDateShort(station.updatedAt)} />
             <FieldRow label="Notes" value={station.notes} />
+            <FieldRow label="Created At" value={formatDateTime(station.createdAt)} />
+            <FieldRow label="Updated At" value={formatDateTime(station.updatedAt)} />
           </AppCard>
 
           <AppCard>

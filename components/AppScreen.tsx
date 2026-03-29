@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { colors } from '@/components/theme';
+import { colors, spacing } from '@/components/theme';
 
 type AppScreenProps = {
   children: React.ReactNode;
@@ -23,7 +23,7 @@ export const AppScreen = ({
 }: AppScreenProps): React.JSX.Element => {
   if (scroll) {
     return (
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+      <SafeAreaView style={styles.safeArea} edges={['left', 'right']}>
         <ScrollView
           contentContainerStyle={[styles.content, contentContainerStyle]}
           keyboardShouldPersistTaps="handled"
@@ -36,7 +36,7 @@ export const AppScreen = ({
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.safeArea} edges={['left', 'right']}>
       <View style={[styles.content, contentContainerStyle]}>{children}</View>
     </SafeAreaView>
   );
@@ -50,8 +50,9 @@ const styles = StyleSheet.create({
   content: {
     flexGrow: 1,
     paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingTop: spacing.xs,
     paddingBottom: 24,
     backgroundColor: colors.background,
+    gap: spacing.md,
   },
 });

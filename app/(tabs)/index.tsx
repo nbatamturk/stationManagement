@@ -2,7 +2,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { AppButton, AppCard, AppScreen, LoadingState, SectionHeader, StatusBadge, colors } from '@/components';
+import { AppButton, AppCard, AppScreen, EmptyState, LoadingState, StatusBadge, colors } from '@/components';
 import { getDashboardMetrics, getRecentlyUpdatedStations } from '@/features/stations';
 import type { Station } from '@/types';
 import { formatDateShort } from '@/utils/date';
@@ -54,11 +54,6 @@ export default function DashboardScreen(): React.JSX.Element {
 
   return (
     <AppScreen>
-      <SectionHeader
-        title="Engineering Station Tracker"
-        subtitle="Operational overview of charging stations used in validation testing"
-      />
-
       <AppCard style={styles.metricsCard}>
         <Text style={styles.cardTitle}>Station Status Overview</Text>
         {loading ? (
@@ -79,6 +74,13 @@ export default function DashboardScreen(): React.JSX.Element {
         <Text style={styles.cardTitle}>Recently Updated</Text>
         {loading ? (
           <LoadingState label="Loading stations..." />
+        ) : recentStations.length === 0 ? (
+          <EmptyState
+            title="No recent updates"
+            description="Stations will appear here after records are added or edited."
+            actionLabel="Add First Station"
+            onActionPress={() => router.push('/stations/edit')}
+          />
         ) : (
           recentStations.map((station) => (
             <Pressable

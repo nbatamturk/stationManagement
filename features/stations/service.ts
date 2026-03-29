@@ -39,6 +39,10 @@ type StatusCountRow = {
   count: number;
 };
 
+type ExistingStationIdentityRow = {
+  id: string;
+};
+
 const mapStationRow = (row: StationRow): Station => ({
   id: row.id,
   name: row.name,
@@ -234,6 +238,50 @@ export const upsertStation = async (
   const nowIso = new Date().toISOString();
 
   await withDatabase(async (db) => {
+    const currentId = draft.id ?? '';
+
+    const duplicateCode = await db.getFirstAsync<ExistingStationIdentityRow>(
+      `SELECT id
+       FROM stations
+       WHERE code = ?
+         AND id != ?
+       LIMIT 1;`,
+      draft.code.trim(),
+      currentId,
+    );
+
+    if (duplicateCode) {
+      throw new Error('Station code already exists. Use a unique code.');
+    }
+
+    const duplicateQrCode = await db.getFirstAsync<ExistingStationIdentityRow>(
+      `SELECT id
+       FROM stations
+       WHERE qrCode = ?
+         AND id != ?
+       LIMIT 1;`,
+      draft.qrCode.trim(),
+      currentId,
+    );
+
+    if (duplicateQrCode) {
+      throw new Error('QR code already exists. Use a unique QR value.');
+    }
+
+    const duplicateSerialNumber = await db.getFirstAsync<ExistingStationIdentityRow>(
+      `SELECT id
+       FROM stations
+       WHERE serialNumber = ?
+         AND id != ?
+       LIMIT 1;`,
+      draft.serialNumber.trim(),
+      currentId,
+    );
+
+    if (duplicateSerialNumber) {
+      throw new Error('Serial number already exists. Use a unique serial number.');
+    }
+
     const existing = draft.id
       ? await db.getFirstAsync<{ createdAt: string }>(
           'SELECT createdAt FROM stations WHERE id = ? LIMIT 1;',
