@@ -1,20 +1,85 @@
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 
-import { AppButton, AppCard, AppScreen, EmptyState, LoadingState, StatusBadge, colors } from '@/components';
+import {
+  AppButton,
+  AppCard,
+  AppScreen,
+  AppTextInput,
+  EmptyState,
+  LoadingState,
+  OptionChip,
+  StatusBadge,
+  colors,
+} from '@/components';
 import { getCustomFieldDefinitions } from '@/features/custom-fields';
-import { getStationById } from '@/features/stations';
-import type { CustomFieldDefinition } from '@/types';
+import { addStationIssueRecord, getStationIssueRecords } from '@/features/issues';
+import { archiveStation, deleteStation, getStationById } from '@/features/stations';
 import type { StationDetails } from '@/features/stations';
+import { addStationTestHistory, getStationTestHistory } from '@/features/test-history';
+import type {
+  CustomFieldDefinition,
+  IssueSeverity,
+  StationIssueRecord,
+  StationTestHistoryRecord,
+  TestResult,
+} from '@/types';
 import { formatDateShort, formatDateTime } from '@/utils/date';
 import { STATION_STATUS_LABELS } from '@/utils/station';
+
+const testResultOptions: Array<{ label: string; value: TestResult }> = [
+  { label: 'Pass', value: 'pass' },
+  { label: 'Warning', value: 'warning' },
+  { label: 'Fail', value: 'fail' },
+];
+
+const issueSeverityOptions: Array<{ label: string; value: IssueSeverity }> = [
+  { label: 'Low', value: 'low' },
+  { label: 'Medium', value: 'medium' },
+  { label: 'High', value: 'high' },
+  { label: 'Critical', value: 'critical' },
+];
+
+const TEST_RESULT_LABELS: Record<TestResult, string> = {
+  pass: 'Pass',
+  warning: 'Warning',
+  fail: 'Fail',
+};
+
+const TEST_RESULT_COLORS: Record<TestResult, string> = {
+  pass: '#0F9D58',
+  warning: '#F9A825',
+  fail: '#D93025',
+};
+
+const ISSUE_SEVERITY_COLORS: Record<IssueSeverity, string> = {
+  low: '#0F9D58',
+  medium: '#1E88E5',
+  high: '#FB8C00',
+  critical: '#D93025',
+};
+
+const ISSUE_STATUS_LABELS: Record<StationIssueRecord['status'], string> = {
+  open: 'Open',
+  in_progress: 'In Progress',
+  resolved: 'Resolved',
+  closed: 'Closed',
+};
 
 const FieldRow = ({ label, value }: { label: string; value?: string | number | null }): React.JSX.Element => {
   return (
     <View style={styles.fieldRow}>
       <Text style={styles.fieldLabel}>{label}</Text>
       <Text style={styles.fieldValue}>{value ?? '-'}</Text>
+    </View>
+  );
+};
+
+const InfoPill = ({ label, color }: { label: string; color: string }): React.JSX.Element => {
+  return (
+    <View style={[styles.pill, { backgroundColor: `${color}1A` }]}>
+      <Text style={[styles.pillText, { color }]}>{label}</Text>
     </View>
   );
 };
@@ -26,8 +91,43 @@ export default function StationDetailScreen(): React.JSX.Element {
   const stationId = typeof params.id === 'string' ? params.id : '';
 
   const [loading, setLoading] = useState(true);
+  const [savingTest, setSavingTest] = useState(false);
+  const [savingIssue, setSavingIssue] = useState(false);
+  const [processingLifecycleAction, setProcessingLifecycleAction] = useState(false);
+
   const [station, setStation] = useState<StationDetails | null>(null);
   const [customDefinitions, setCustomDefinitions] = useState<CustomFieldDefinition[]>([]);
+  const [testHistory, setTestHistory] = useState<StationTestHistoryRecord[]>([]);
+  const [issueRecords, setIssueRecords] = useState<StationIssueRecord[]>([]);
+
+  const [testForm, setTestForm] = useState({
+    testType: '',
+    result: 'pass' as TestResult,
+    notes: '',
+  });
+  const [issueForm, setIssueForm] = useState({
+    title: '',
+    severity: 'medium' as IssueSeverity,
+    description: '',
+  });
+
+  const [testFormError, setTestFormError] = useState('');
+  const [issueFormError, setIssueFormError] = useState('');
+  const [actionError, setActionError] = useState('');
+
+  const refreshSecondPhaseSections = useCallback(async () => {
+    if (!stationId) {
+      return;
+    }
+
+    const [historyResult, issueResult] = await Promise.all([
+      getStationTestHistory(stationId),
+      getStationIssueRecords(stationId),
+    ]);
+
+    setTestHistory(historyResult);
+    setIssueRecords(issueResult);
+  }, [stationId]);
 
   const loadStation = useCallback(async () => {
     if (!stationId) {
@@ -39,13 +139,17 @@ export default function StationDetailScreen(): React.JSX.Element {
     setLoading(true);
 
     try {
-      const [stationResult, definitionResult] = await Promise.all([
+      const [stationResult, definitionResult, historyResult, issueResult] = await Promise.all([
         getStationById(stationId),
         getCustomFieldDefinitions(false),
+        getStationTestHistory(stationId),
+        getStationIssueRecords(stationId),
       ]);
 
       setStation(stationResult);
       setCustomDefinitions(definitionResult);
+      setTestHistory(historyResult);
+      setIssueRecords(issueResult);
     } finally {
       setLoading(false);
     }
@@ -62,12 +166,204 @@ export default function StationDetailScreen(): React.JSX.Element {
       return [];
     }
 
-    return customDefinitions.map((definition) => ({
+    const knownIds = new Set(customDefinitions.map((definition) => definition.id));
+
+    const rows = customDefinitions.map((definition) => ({
       id: definition.id,
       label: definition.label,
       value: station.customValuesByFieldId[definition.id] ?? '-',
     }));
+
+    for (const [fieldId, value] of Object.entries(station.customValuesByFieldId)) {
+      if (!knownIds.has(fieldId)) {
+        rows.push({
+          id: fieldId,
+          label: `Archived Field (${fieldId})`,
+          value,
+        });
+      }
+    }
+
+    return rows;
   }, [customDefinitions, station]);
+
+  const submitTestRecord = async (): Promise<void> => {
+    if (!station) {
+      return;
+    }
+
+    setTestFormError('');
+
+    const normalizedType = testForm.testType.trim();
+    if (!normalizedType) {
+      setTestFormError('Test type is required.');
+      return;
+    }
+
+    if (normalizedType.length < 3) {
+      setTestFormError('Test type must be at least 3 characters.');
+      return;
+    }
+
+    setSavingTest(true);
+
+    try {
+      await addStationTestHistory({
+        stationId: station.id,
+        testType: normalizedType,
+        result: testForm.result,
+        notes: testForm.notes.trim() || undefined,
+      });
+
+      await refreshSecondPhaseSections();
+
+      setTestForm({
+        testType: '',
+        result: 'pass',
+        notes: '',
+      });
+    } catch (error) {
+      setTestFormError(
+        error instanceof Error
+          ? `Could not save test record: ${error.message}`
+          : 'Could not save test record. Please try again.',
+      );
+    } finally {
+      setSavingTest(false);
+    }
+  };
+
+  const submitIssueRecord = async (): Promise<void> => {
+    if (!station) {
+      return;
+    }
+
+    setIssueFormError('');
+
+    const normalizedTitle = issueForm.title.trim();
+    if (!normalizedTitle) {
+      setIssueFormError('Issue title is required.');
+      return;
+    }
+
+    if (normalizedTitle.length < 3) {
+      setIssueFormError('Issue title must be at least 3 characters.');
+      return;
+    }
+
+    setSavingIssue(true);
+
+    try {
+      await addStationIssueRecord({
+        stationId: station.id,
+        title: normalizedTitle,
+        severity: issueForm.severity,
+        description: issueForm.description.trim() || undefined,
+      });
+
+      await refreshSecondPhaseSections();
+
+      setIssueForm({
+        title: '',
+        severity: 'medium',
+        description: '',
+      });
+    } catch (error) {
+      setIssueFormError(
+        error instanceof Error
+          ? `Could not save issue record: ${error.message}`
+          : 'Could not save issue record. Please try again.',
+      );
+    } finally {
+      setSavingIssue(false);
+    }
+  };
+
+  const runArchive = async (): Promise<void> => {
+    if (!station) {
+      return;
+    }
+
+    setActionError('');
+    setProcessingLifecycleAction(true);
+
+    try {
+      await archiveStation(station.id);
+      router.replace('/stations');
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? `Could not archive station: ${error.message}`
+          : 'Could not archive station. Please try again.',
+      );
+    } finally {
+      setProcessingLifecycleAction(false);
+    }
+  };
+
+  const runDelete = async (): Promise<void> => {
+    if (!station) {
+      return;
+    }
+
+    setActionError('');
+    setProcessingLifecycleAction(true);
+
+    try {
+      await deleteStation(station.id);
+      router.replace('/stations');
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? `Could not delete station: ${error.message}`
+          : 'Could not delete station. Please try again.',
+      );
+    } finally {
+      setProcessingLifecycleAction(false);
+    }
+  };
+
+  const confirmArchive = (): void => {
+    if (!station || station.status === 'retired') {
+      return;
+    }
+
+    Alert.alert(
+      'Archive Station',
+      `Archive "${station.name}"? The station will remain in records with status "Retired".`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Archive',
+          style: 'default',
+          onPress: () => {
+            void runArchive();
+          },
+        },
+      ],
+    );
+  };
+
+  const confirmDelete = (): void => {
+    if (!station) {
+      return;
+    }
+
+    Alert.alert(
+      'Delete Station',
+      `Delete "${station.name}" permanently? This will also remove local test history, issues, and custom values linked to this station.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            void runDelete();
+          },
+        },
+      ],
+    );
+  };
 
   return (
     <AppScreen>
@@ -114,18 +410,171 @@ export default function StationDetailScreen(): React.JSX.Element {
           <AppCard>
             <Text style={styles.cardTitle}>Custom Properties</Text>
             {customFieldRows.length === 0 ? (
-              <Text style={styles.emptyCustomFields}>No custom field values defined for this station.</Text>
+              <Text style={styles.emptyText}>No custom field values are available for this station.</Text>
             ) : (
-              customFieldRows.map((item) => (
-                <FieldRow key={item.id} label={item.label} value={item.value} />
-              ))
+              customFieldRows.map((item) => <FieldRow key={item.id} label={item.label} value={item.value} />)
             )}
           </AppCard>
+
+          <AppCard>
+            <Text style={styles.cardTitle}>Test History</Text>
+
+            {testHistory.length === 0 ? (
+              <Text style={styles.emptyText}>No test records added yet.</Text>
+            ) : (
+              testHistory.map((record) => (
+                <View key={record.id} style={styles.recordItem}>
+                  <View style={styles.recordHeader}>
+                    <Text style={styles.recordTitle}>{record.testType}</Text>
+                    <InfoPill
+                      label={TEST_RESULT_LABELS[record.result]}
+                      color={TEST_RESULT_COLORS[record.result]}
+                    />
+                  </View>
+                  <Text style={styles.recordMeta}>Performed: {formatDateTime(record.performedAt)}</Text>
+                  {record.performedBy ? (
+                    <Text style={styles.recordMeta}>Performed By: {record.performedBy}</Text>
+                  ) : null}
+                  {record.notes ? <Text style={styles.recordBody}>{record.notes}</Text> : null}
+                </View>
+              ))
+            )}
+
+            <View style={styles.sectionDivider} />
+            <Text style={styles.formTitle}>Add Test Record</Text>
+
+            <AppTextInput
+              label="Test Type"
+              required
+              value={testForm.testType}
+              onChangeText={(value) => setTestForm((prev) => ({ ...prev, testType: value }))}
+              placeholder="Example: Functional Verification"
+            />
+
+            <View style={styles.formGroup}>
+              <Text style={styles.filterLabel}>Result</Text>
+              <View style={styles.inlineRow}>
+                {testResultOptions.map((option) => (
+                  <OptionChip
+                    key={option.value}
+                    label={option.label}
+                    selected={testForm.result === option.value}
+                    onPress={() => setTestForm((prev) => ({ ...prev, result: option.value }))}
+                  />
+                ))}
+              </View>
+            </View>
+
+            <AppTextInput
+              label="Notes"
+              value={testForm.notes}
+              onChangeText={(value) => setTestForm((prev) => ({ ...prev, notes: value }))}
+              placeholder="Optional details"
+              multiline
+            />
+
+            {testFormError ? <Text style={styles.errorText}>{testFormError}</Text> : null}
+
+            <AppButton
+              label={savingTest ? 'Saving Test Record...' : 'Add Test Record'}
+              onPress={() => {
+                void submitTestRecord();
+              }}
+              disabled={savingTest}
+            />
+          </AppCard>
+
+          <AppCard>
+            <Text style={styles.cardTitle}>Issue / Fault Records</Text>
+
+            {issueRecords.length === 0 ? (
+              <Text style={styles.emptyText}>No issue records added yet.</Text>
+            ) : (
+              issueRecords.map((record) => (
+                <View key={record.id} style={styles.recordItem}>
+                  <View style={styles.recordHeader}>
+                    <Text style={styles.recordTitle}>{record.title}</Text>
+                    <View style={styles.badgeRow}>
+                      <InfoPill
+                        label={record.severity.toUpperCase()}
+                        color={ISSUE_SEVERITY_COLORS[record.severity]}
+                      />
+                      <InfoPill label={ISSUE_STATUS_LABELS[record.status]} color={colors.primary} />
+                    </View>
+                  </View>
+                  <Text style={styles.recordMeta}>Reported: {formatDateTime(record.reportedAt)}</Text>
+                  {record.description ? <Text style={styles.recordBody}>{record.description}</Text> : null}
+                </View>
+              ))
+            )}
+
+            <View style={styles.sectionDivider} />
+            <Text style={styles.formTitle}>Add Issue Record</Text>
+
+            <AppTextInput
+              label="Issue Title"
+              required
+              value={issueForm.title}
+              onChangeText={(value) => setIssueForm((prev) => ({ ...prev, title: value }))}
+              placeholder="Example: Connector latch fault"
+            />
+
+            <View style={styles.formGroup}>
+              <Text style={styles.filterLabel}>Severity</Text>
+              <View style={styles.inlineRow}>
+                {issueSeverityOptions.map((option) => (
+                  <OptionChip
+                    key={option.value}
+                    label={option.label}
+                    selected={issueForm.severity === option.value}
+                    onPress={() => setIssueForm((prev) => ({ ...prev, severity: option.value }))}
+                  />
+                ))}
+              </View>
+            </View>
+
+            <AppTextInput
+              label="Description"
+              value={issueForm.description}
+              onChangeText={(value) => setIssueForm((prev) => ({ ...prev, description: value }))}
+              placeholder="Optional details"
+              multiline
+            />
+
+            {issueFormError ? <Text style={styles.errorText}>{issueFormError}</Text> : null}
+
+            <AppButton
+              label={savingIssue ? 'Saving Issue Record...' : 'Add Issue Record'}
+              onPress={() => {
+                void submitIssueRecord();
+              }}
+              disabled={savingIssue}
+            />
+          </AppCard>
+
+          {actionError ? <Text style={styles.errorText}>{actionError}</Text> : null}
 
           <AppButton
             label="Edit Station"
             onPress={() => router.push({ pathname: '/stations/edit', params: { stationId: station.id } })}
           />
+
+          <View style={styles.actionRow}>
+            <AppButton
+              label={station.status === 'retired' ? 'Already Archived' : 'Archive Station'}
+              onPress={confirmArchive}
+              variant="secondary"
+              disabled={processingLifecycleAction || station.status === 'retired'}
+              style={styles.actionButton}
+            />
+            <AppButton
+              label={processingLifecycleAction ? 'Processing...' : 'Delete Station'}
+              onPress={confirmDelete}
+              variant="danger"
+              disabled={processingLifecycleAction}
+              style={styles.actionButton}
+            />
+          </View>
         </>
       )}
     </AppScreen>
@@ -153,6 +602,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.mutedText,
   },
+  cardTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 2,
+  },
   fieldRow: {
     gap: 2,
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -168,14 +623,86 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.text,
   },
-  cardTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 4,
-  },
-  emptyCustomFields: {
+  emptyText: {
     color: colors.mutedText,
     fontSize: 13,
+  },
+  recordItem: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    padding: 10,
+    gap: 4,
+    backgroundColor: colors.surface,
+  },
+  recordHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+    alignItems: 'flex-start',
+  },
+  recordTitle: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+    flex: 1,
+  },
+  recordMeta: {
+    color: colors.mutedText,
+    fontSize: 12,
+  },
+  recordBody: {
+    color: colors.text,
+    fontSize: 13,
+  },
+  pill: {
+    borderRadius: 999,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  pillText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  sectionDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    marginVertical: 4,
+  },
+  formTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  formGroup: {
+    gap: 8,
+  },
+  filterLabel: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  inlineRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  errorText: {
+    color: colors.danger,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  actionButton: {
+    flex: 1,
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    gap: 6,
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
   },
 });

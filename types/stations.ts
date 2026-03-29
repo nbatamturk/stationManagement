@@ -1,3 +1,5 @@
+import type { CustomFieldType } from './custom-fields';
+
 export type StationCurrentType = 'AC' | 'DC';
 
 export type StationStatus =
@@ -8,6 +10,12 @@ export type StationStatus =
   | 'retired';
 
 export type StationSortBy = 'name' | 'updatedAt' | 'powerKw';
+
+export interface StationListCustomFieldFilter {
+  fieldId: string;
+  type: CustomFieldType;
+  value: string;
+}
 
 export interface Station {
   id: string;
@@ -50,6 +58,7 @@ export interface StationListFilters {
   brand: string | 'all';
   currentType: StationCurrentType | 'all';
   sortBy: StationSortBy;
+  customFieldFilters: StationListCustomFieldFilter[];
 }
 
 export interface StationDraft extends Omit<Station, 'id' | 'createdAt' | 'updatedAt'> {

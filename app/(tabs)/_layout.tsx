@@ -48,7 +48,7 @@ export default function TabLayout(): React.JSX.Element {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Ana Sayfa',
+          title: 'Dashboard',
           tabBarIcon: ({ color }) => <TabIcon name="home-outline" color={color} />,
         }}
       />

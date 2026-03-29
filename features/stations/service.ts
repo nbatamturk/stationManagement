@@ -62,9 +62,82 @@ const mapStationRow = (row: StationRow): Station => ({
   updatedAt: row.updatedAt,
 });
 
-const buildStationListQuery = (filters: StationListFilters): { query: string; params: string[] } => {
+const isValidDateOnly = (value: string): boolean => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+
+  return !Number.isNaN(new Date(value).getTime());
+};
+
+const addCustomFieldFilterClause = (
+  whereClauses: string[],
+  params: Array<string | number>,
+  filter: StationListFilters['customFieldFilters'][number],
+): void => {
+  const value = filter.value.trim();
+
+  if (!value) {
+    return;
+  }
+
+  const clausePrefix = `EXISTS (
+      SELECT 1
+      FROM station_custom_field_values v
+      INNER JOIN custom_field_definitions d ON d.id = v.fieldId
+      WHERE v.stationId = stations.id
+        AND v.fieldId = ?
+        AND d.type = ?
+        AND d.isFilterable = 1
+        AND d.isActive = 1
+        AND `;
+
+  if (filter.type === 'text') {
+    whereClauses.push(`${clausePrefix}v.value LIKE ? COLLATE NOCASE)`);
+    params.push(filter.fieldId, filter.type, `%${value}%`);
+    return;
+  }
+
+  if (filter.type === 'number') {
+    const numericValue = Number(value);
+    if (Number.isNaN(numericValue)) {
+      return;
+    }
+
+    whereClauses.push(`${clausePrefix}CAST(v.value AS REAL) = ?)`);
+    params.push(filter.fieldId, filter.type, numericValue);
+    return;
+  }
+
+  if (filter.type === 'boolean') {
+    if (value !== 'true' && value !== 'false') {
+      return;
+    }
+
+    whereClauses.push(`${clausePrefix}v.value = ?)`);
+    params.push(filter.fieldId, filter.type, value);
+    return;
+  }
+
+  if (filter.type === 'date') {
+    if (!isValidDateOnly(value)) {
+      return;
+    }
+
+    whereClauses.push(`${clausePrefix}v.value = ?)`);
+    params.push(filter.fieldId, filter.type, value);
+    return;
+  }
+
+  whereClauses.push(`${clausePrefix}v.value = ? COLLATE NOCASE)`);
+  params.push(filter.fieldId, filter.type, value);
+};
+
+const buildStationListQuery = (
+  filters: StationListFilters,
+): { query: string; params: Array<string | number> } => {
   const whereClauses: string[] = [];
-  const params: string[] = [];
+  const params: Array<string | number> = [];
 
   const searchText = filters.searchText.trim();
   if (searchText) {
@@ -86,6 +159,10 @@ const buildStationListQuery = (filters: StationListFilters): { query: string; pa
   if (filters.currentType !== 'all') {
     whereClauses.push('currentType = ?');
     params.push(filters.currentType);
+  }
+
+  for (const customFilter of filters.customFieldFilters) {
+    addCustomFieldFilterClause(whereClauses, params, customFilter);
   }
 
   const orderByClause: Record<StationListFilters['sortBy'], string> = {
@@ -403,5 +480,26 @@ export const getRecentlyUpdatedStations = async (limit = 5): Promise<Station[]> 
     );
 
     return rows.map(mapStationRow);
+  });
+};
+
+export const archiveStation = async (stationId: string): Promise<void> => {
+  const nowIso = new Date().toISOString();
+
+  await withDatabase(async (db) => {
+    await db.runAsync(
+      `UPDATE stations
+       SET status = 'retired',
+           updatedAt = ?
+       WHERE id = ?;`,
+      nowIso,
+      stationId,
+    );
+  });
+};
+
+export const deleteStation = async (stationId: string): Promise<void> => {
+  await withDatabase(async (db) => {
+    await db.runAsync('DELETE FROM stations WHERE id = ?;', stationId);
   });
 };
